@@ -148,13 +148,29 @@ function createNeonSql(): Promise<Sql> {
 
 async function createPgliteSql(): Promise<Sql> {
   // Embedded Postgres. New files in /migrations apply when this module reloads.
-  // One instance per process, shared across HMR, stored on disk so accounts
-  // survive a dev-server restart. Production uses Neon when DATABASE_URL is set.
+  // One instance per process, shared across HMR. Prefer a writable temp dir so
+  // accounts survive a dev-server restart. Hosted runtimes (Vercel) cannot
+  // create /workspace/data — a failed mkdir must fall back to memory instead of
+  // surfacing EACCES on the page. Production uses MariaDB/Neon when configured.
   globalRef.__pgliteInstance__ ??= (async () => {
     const { PGlite } = await import("@electric-sql/pglite");
     const { mkdirSync } = await import("node:fs");
-    const dataDir = "/workspace/data/agora-pglite";
-    mkdirSync(dataDir, { recursive: true });
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const candidates = [
+      process.env.PGLITE_DATA_DIR?.trim(),
+      join(tmpdir(), "agora-pglite"),
+    ].filter((dir): dir is string => Boolean(dir));
+    let dataDir = "memory://";
+    for (const dir of candidates) {
+      try {
+        mkdirSync(dir, { recursive: true });
+        dataDir = dir;
+        break;
+      } catch (err) {
+        console.error("[db] PGLite data dir not writable, trying next:", dir, err);
+      }
+    }
     const pg = new PGlite({
       dataDir,
       parsers: {
