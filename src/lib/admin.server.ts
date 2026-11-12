@@ -187,7 +187,7 @@ export async function handleAdmin(request: Request): Promise<Response> {
     if (path === "overview" && method === "GET") return await overview(request);
     if (path === "users" && method === "GET") return await users(request, url);
     if (path === "users" && method === "PUT") return await saveUser(request);
-    const userAction = path.match(/^users\/([^/]+)(?:\/(balance|reset-password|verify|suspend|ban|delete|sign-out|deposits|withdrawals|artworks|transactions|activity))?$/);
+    const userAction = path.match(/^users\/([^/]+)(?:\/(balance|reset-password|verify|resend-code|suspend|ban|delete|sign-out|deposits|withdrawals|artworks|transactions|activity))?$/);
     if (userAction && method === "GET" && !userAction[2]) return await userDetail(request, decodeURIComponent(userAction[1]));
     if (userAction && method === "PUT" && !userAction[2]) return await saveUser(request, decodeURIComponent(userAction[1]));
     if (userAction && method === "POST" && userAction[2] === "balance") return await adjustBalance(request, decodeURIComponent(userAction[1]));
@@ -451,6 +451,12 @@ async function userActionRoute(request: Request, userId: string, action: string)
     await sql.query(`update "user" set "emailVerified" = true, "updatedAt" = now() where "id" = $1`, [userId]);
     await audit(sql, admin.id, "user.verify", userId, "Email verified by admin", ip);
     return json({ ok: true });
+  }
+  if (action === "resend-code") {
+    const { issueCode } = await import("./verify.server");
+    const result = await issueCode(userId, { ip, bypassLimit: true });
+    await audit(sql, admin.id, "user.resend-code", userId, `Code sent to ${result.email}`, ip);
+    return json({ ok: true, email: result.email });
   }
   if (action === "suspend" || action === "ban" || action === "delete") {
     const status = action === "suspend" ? "suspended" : action === "ban" ? "banned" : "deleted";

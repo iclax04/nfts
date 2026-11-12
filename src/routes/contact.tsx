@@ -35,7 +35,7 @@ function ContactPage() {
     <article className="mx-auto max-w-xl px-4 py-12">
       <p className="text-sm font-semibold text-accent">Support</p>
       <h1 className="mt-2 text-4xl">Contact Us</h1>
-      <p className="mt-3 text-sm text-muted">Send a message to support@agoragallery.com. We reply by email.</p>
+      <p className="mt-3 text-sm text-muted">Send a message to <a className="text-accent" href="mailto:support@agora-gallery.io">support@agora-gallery.io</a>. We reply by email.</p>
       {sent ? (
         <p className="mt-8 rounded-2xl bg-raised p-4 text-sm">We received your message and will reply to the email address you provided.</p>
       ) : (

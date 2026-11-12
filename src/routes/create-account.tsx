@@ -1,10 +1,8 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState, type FormEvent } from "react";
-import { authClient, authEnabled, GROK_PROVIDERS, signIn } from "@/lib/auth/client";
+import { authEnabled, GROK_PROVIDERS, signIn } from "@/lib/auth/client";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { errMsg } from "@/lib/format";
-import { updateMe } from "@/lib/market.functions";
-import { sendEmailCode } from "@/lib/verify.functions";
 
 export const Route = createFileRoute("/create-account")({
   component: CreateAccountPage,
@@ -38,33 +36,36 @@ function CreateAccountPage() {
       return;
     }
     setBusy(true);
+    let created = false;
     try {
-      const result = await authClient.signUp.email({
-        email: email.trim(),
-        password,
-        name: name.trim(),
-        callbackURL: "/dashboard",
+      await fetch("/api/auth/logout", { method: "POST", credentials: "include" }).catch(() => undefined);
+      try {
+        window.sessionStorage.removeItem("grok-auth.bearer-token");
+      } catch {
+        /* storage unavailable */
+      }
+      const result = await fetch("/api/auth/register", {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: name.trim(), username: handle, email: email.trim(), password }),
       });
-      if (result.error) throw new Error(result.error.message || "Could not create the account.");
-      await updateMe({
-        data: {
-          displayName: name.trim(),
-          username: handle,
-          bio: "",
-          city: "",
-          phone: "",
-          region: "",
-          postalCode: "",
-          siteUrl: "",
-          xHandle: "",
-          avatar: "",
-          clearAvatar: false,
-          wallet: "",
-        },
-      });
-      await sendEmailCode();
-      window.location.replace(`/verify-email?email=${encodeURIComponent(email.trim())}`);
+      const data = (await result.json().catch(() => null)) as { error?: string; email?: string; sent?: boolean } | null;
+      if (!result.ok) throw new Error(data?.error || "Could not create the account.");
+      created = true;
+      try {
+        window.sessionStorage.setItem("agora-signup-profile", JSON.stringify({ username: handle, displayName: name.trim() }));
+        if (data?.sent === false) window.sessionStorage.setItem("agora-mail-error", data.error || "We could not email the code. Use Resend code.");
+        else window.sessionStorage.removeItem("agora-mail-error");
+      } catch {
+        /* storage unavailable */
+      }
+      window.location.assign(`/verify-email?email=${encodeURIComponent(data?.email || email.trim())}&sent=${data?.sent === false ? "0" : "1"}`);
     } catch (caught) {
+      if (created && !/username is taken/i.test(errMsg(caught))) {
+        window.location.replace(`/verify-email?email=${encodeURIComponent(email.trim())}`);
+        return;
+      }
       setError(errMsg(caught));
       setBusy(false);
     }
@@ -76,13 +77,14 @@ function CreateAccountPage() {
         <p className="kicker">Agora Gallery NFTs</p>
         <h1 className="mt-2 text-4xl">Create an account</h1>
         <p className="mt-2 text-sm text-muted">Open a studio, mint work, and collect from the marketplace.</p>
+        {error ? <p className="mt-4 text-sm text-danger" role="alert">{error}</p> : null}
         {isPending ? <p className="mt-6 text-muted">Checking your session…</p> : null}
         {!isPending && user ? (
           <p className="mt-6 text-sm text-muted">
-            You are already signed in. <Link to="/dashboard" className="font-semibold text-accent">Go to your dashboard.</Link>
+            You are already signed in. <Link to="/dashboard" className="font-semibold text-accent">Go to your dashboard</Link>, or create a different account below.
           </p>
         ) : null}
-        {!isPending && !user ? (
+        {!isPending ? (
           <div className="mt-8 space-y-3">
             {authEnabled
               ? GROK_PROVIDERS.map((provider) => (

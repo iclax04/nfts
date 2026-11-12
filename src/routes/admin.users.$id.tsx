@@ -147,6 +147,7 @@ function UserPage() {
       <div className="mt-4 flex flex-wrap gap-2">
         <input className="field max-w-xs" placeholder="New password" value={password} onChange={(event) => setPassword(event.target.value)} />
         <button type="button" className="btn-ghost" onClick={() => void action("reset-password", { password })}>Reset password</button>
+        <button type="button" className="btn-ghost" onClick={() => void action("resend-code")}>Resend code</button>
         <button type="button" className="btn-ghost" onClick={() => void action("verify")}>Force verify email</button>
         <button type="button" className="btn-ghost" onClick={() => void action("suspend")}>Suspend</button>
         <button type="button" className="btn-ghost" onClick={() => void action("ban")}>Ban</button>

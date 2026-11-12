@@ -1,5 +1,5 @@
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
-import { Activity, ChevronDown, Circle, Compass, Home, Menu, Radio, Search, X } from "lucide-react";
+import { Activity, ChevronDown, Compass, Home, Menu, Radio, Search, X } from "lucide-react";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { SignedIn } from "@/lib/auth/gates";
@@ -134,9 +134,7 @@ export function Shell({ children }: { children: ReactNode }) {
                 </button>
               )}
               <Link to="/login" search={{ mode: "in" }} className="rounded-xl px-3 py-2 text-[15px] font-semibold hover:bg-white/10">Sign in</Link>
-              <Link to="/create-account" aria-label="Create account" className="grid h-9 w-9 place-items-center rounded-full border border-white/30 text-white/80">
-                <Circle size={18} aria-hidden />
-              </Link>
+              <Link to="/create-account" className="rounded-full bg-[#2081e2] px-4 py-2 text-[15px] font-semibold text-white">Create account</Link>
             </div>
           </div>
         </header>

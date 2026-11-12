@@ -276,10 +276,6 @@ async function assertVerified(sql: Sql, userId: string) {
     [userId],
   );
   const row = rows[0];
-  if (row?.email?.toLowerCase() === "emmanuelsebastine85@gmail.com" && !row.verified) {
-    await sql.query(`update "user" set "emailVerified" = true, "updatedAt" = now() where "id" = $1`, [userId]);
-    return;
-  }
   if (!row?.verified) throw new Error("Verify your email before you continue.");
 }
 
@@ -421,8 +417,8 @@ async function settleOne(sql: Sql, listingId: number) {
 
 async function prepare(sql: Sql) {
   await sql.query(
-    `update "user" set "emailVerified" = true, "updatedAt" = now()
-     where lower("email") = 'emmanuelsebastine85@gmail.com' and "emailVerified" = false`,
+    `update settings set support_email = 'support@agora-gallery.io'
+     where id = 1 and support_email in ('support@agoragallery.nfts', 'support@agoragallery.com', '')`,
   );
   await advanceDeposits(sql);
   const due = await sql.query<{ id: number }>(
@@ -2422,6 +2418,12 @@ export const submitContact = createServerFn({ method: "POST" })
     await sql.query(
       `insert into contact_messages (name, email, topic, message) values ($1, $2, $3, $4)`,
       [data.name, data.email, data.topic, data.message],
+    );
+    const { sendAccountNotice } = await import("./mail.server");
+    await sendAccountNotice(
+      "support@agora-gallery.io",
+      `Contact: ${data.topic}`,
+      `${data.name} <${data.email}>\n\n${data.message}`,
     );
     return { ok: true };
   });

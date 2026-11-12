@@ -17,7 +17,7 @@ const PAGES: Record<string, { title: string; body: string[] }> = {
       "We collect the information you give us: name, email, password (stored as a hash), profile details, and messages you send to support.",
       "We also store marketplace activity, including listings, purchases, deposits, withdrawals, and sign-in records, so we can operate your account and investigate disputes.",
       "We do not sell personal information. We share it only with service providers who process it for us, or when the law requires it.",
-      "You may request a correction or deletion of your account by contacting support@agoragallery.com. Some records are kept where we have a legal duty to retain them.",
+      "You may request a correction or deletion of your account by contacting support@agora-gallery.io. Some records are kept where we have a legal duty to retain them.",
     ],
   },
   cookies: {

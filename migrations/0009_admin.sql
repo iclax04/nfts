@@ -27,7 +27,7 @@ create table if not exists deposit_address_history (
 );
 
 alter table settings add column if not exists platform_deposit_address text not null default '';
-alter table settings add column if not exists support_email text not null default 'support@agoragallery.nfts';
+alter table settings add column if not exists support_email text not null default 'support@agora-gallery.io';
 alter table settings add column if not exists announcement text not null default '';
 alter table settings add column if not exists auto_approve_enabled boolean not null default false;
 alter table settings add column if not exists withdrawal_warn_eth numeric(18, 6) not null default 5;

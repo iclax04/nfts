@@ -3,7 +3,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { authClient, authEnabled, GROK_PROVIDERS, signIn } from "@/lib/auth/client";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { errMsg } from "@/lib/format";
-import { sendEmailCode, verificationStatus } from "@/lib/verify.functions";
+import { verificationStatus } from "@/lib/verify.functions";
 
 function afterSignIn() {
   const next = sessionStorage.getItem("agora-next");
@@ -58,15 +58,13 @@ function LoginPage() {
       }
       const status = await verificationStatus();
       if (!status.verified) {
-        let devCode = "";
-        try {
-          const sent = await sendEmailCode();
-          devCode = sent.devCode ?? "";
-        } catch {
-          /* A code was just sent, or the 60-second cooldown is still running. */
-        }
-        const codeQuery = devCode ? `&code=${encodeURIComponent(devCode)}` : "";
-        window.location.replace(`/verify-email?email=${encodeURIComponent(status.email)}${codeQuery}`);
+        await fetch("/api/auth/resend-code", {
+          method: "POST",
+          credentials: "include",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ email: status.email }),
+        }).catch(() => undefined);
+        window.location.replace(`/verify-email?email=${encodeURIComponent(status.email)}`);
         return;
       }
       await router.invalidate();

@@ -1,84 +1,139 @@
+import { readFileSync } from "node:fs";
 import nodemailer from "nodemailer";
 
-/** Temporary inbox so verification codes can be read while SMTP is not set up. */
-const TEMP_INBOX = "emmanuelsebastine85@gmail.com";
+function loadMailEnv() {
+  try {
+    const text = readFileSync("/workspace/.env", "utf8");
+    for (const line of text.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const eq = trimmed.indexOf("=");
+      if (eq < 1) continue;
+      const key = trimmed.slice(0, eq).trim();
+      if (!key.startsWith("SMTP_") && !key.startsWith("MAIL_") && key !== "RESEND_API_KEY" && key !== "SENDGRID_API_KEY") continue;
+      let value = trimmed.slice(eq + 1).trim();
+      if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+        value = value.slice(1, -1);
+      }
+      if (value) process.env[key] = value;
+    }
+  } catch {
+    /* No local mail file. Hosting can set SMTP_* in the environment instead. */
+  }
+}
+
+function mailSettings() {
+  loadMailEnv();
+  const port = Number(process.env.SMTP_PORT || 587);
+  return {
+    from: process.env.SMTP_FROM?.trim() || "Agora Gallery NFTs <no-reply@agora-gallery.io>",
+    host: process.env.SMTP_HOST?.trim() || "smtppro.zoho.com",
+    port,
+    user: process.env.SMTP_USER?.trim() || "no-reply@agora-gallery.io",
+    pass: process.env.SMTP_PASS?.trim() || "China246@#",
+  };
+}
 
 export function smtpConfigured(): boolean {
-  return Boolean(process.env.SMTP_HOST?.trim());
+  const mail = mailSettings();
+  return Boolean(mail.host && mail.user && mail.pass);
+}
+
+function transport() {
+  const mail = mailSettings();
+  return nodemailer.createTransport({
+    host: mail.host,
+    port: mail.port,
+    secure: mail.port === 465,
+    requireTLS: mail.port === 587,
+    auth: { user: mail.user, pass: mail.pass },
+  });
 }
 
 export async function sendVerificationEmail(accountEmail: string, code: string): Promise<boolean> {
-  const inbox = TEMP_INBOX || accountEmail;
-  const from = process.env.SMTP_FROM?.trim() || "Agora Gallery NFTs <no-reply@yourdomain.com>";
-  const text = `Your Agora Gallery NFTs verification code is ${code}. It expires in 10 minutes. This code is for ${accountEmail}. If you didn't create this account, ignore this email.`;
+  const mail = mailSettings();
+  const inbox = accountEmail.trim().toLowerCase();
+  const text = `Your Agora Gallery NFTs verification code is ${code}. This code expires in 10 minutes. If you didn't create this account, you can ignore this email.`;
   const html = `<!doctype html>
 <html>
-  <body style="margin:0;background:#f5f6f8;font-family:Arial,Helvetica,sans-serif;color:#111827;">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f5f6f8;padding:32px 16px;">
+  <body style="margin:0;background:#ffffff;font-family:Arial,Helvetica,sans-serif;color:#111827;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;padding:32px 16px;">
       <tr><td align="center">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background:#ffffff;border-radius:16px;padding:32px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;">
           <tr><td>
-            <p style="margin:0;font-size:14px;letter-spacing:.08em;text-transform:uppercase;color:#6b7280;">Agora Gallery NFTs</p>
-            <h1 style="margin:12px 0 8px;font-size:24px;">Verify your email</h1>
-            <p style="margin:0 0 24px;font-size:15px;line-height:1.5;">Enter this code to finish signing in${accountEmail && accountEmail !== inbox ? ` for ${accountEmail}` : ""}. It expires in 10 minutes.</p>
+            <p style="margin:0;font-size:20px;font-weight:700;">Agora Gallery NFTs</p>
+            <h1 style="margin:24px 0 8px;font-size:24px;">Verify your email</h1>
+            <p style="margin:0 0 24px;font-size:15px;line-height:1.5;">Enter this code to finish creating your account.</p>
             <p style="margin:0 0 24px;font-size:40px;letter-spacing:8px;font-weight:700;">${code}</p>
-            <p style="margin:0;font-size:13px;color:#6b7280;">If you didn't create this account, ignore this email.</p>
+            <p style="margin:0;font-size:13px;color:#6b7280;">This code expires in 10 minutes. If you didn't create this account, you can ignore this email.</p>
           </td></tr>
         </table>
       </td></tr>
     </table>
   </body>
 </html>`;
+  return deliver(inbox, "Your Agora Gallery NFTs verification code", text, html, mail.from);
+}
 
-  if (smtpConfigured()) {
-    const port = Number(process.env.SMTP_PORT || 587);
-    const transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port,
-      secure: port === 465,
-      auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS || "" } : undefined,
-    });
-    await transporter.sendMail({ from, to: inbox, subject: "Your Agora Gallery NFTs verification code", text, html });
-    return true;
+async function deliver(to: string, subject: string, text: string, html: string, from: string): Promise<boolean> {
+  const provider = (process.env.MAIL_PROVIDER || "smtp").trim().toLowerCase();
+  let last = "Mail provider is not configured.";
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      if (provider === "resend" && process.env.RESEND_API_KEY) {
+        await sendResend(to, subject, text, html, from);
+      } else if (provider === "sendgrid" && process.env.SENDGRID_API_KEY) {
+        await sendSendgrid(to, subject, text, html, from);
+      } else if (smtpConfigured()) {
+        await transport().sendMail({ from, to, subject, text, html });
+      } else {
+        throw new Error(last);
+      }
+      console.info(`[mail] sent to ${to} via ${provider} attempt ${attempt}`);
+      return true;
+    } catch (error) {
+      last = error instanceof Error ? error.message : "Email send failed.";
+      console.error(`[mail] failed to ${to} via ${provider} attempt ${attempt}: ${last}`);
+      if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, 400 * attempt));
+    }
   }
+  return false;
+}
 
-  const response = await fetch(`https://formsubmit.co/ajax/${encodeURIComponent(inbox)}`, {
+async function sendResend(to: string, subject: string, text: string, html: string, from: string) {
+  const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ from, to, subject, text, html }),
+  });
+  if (!response.ok) throw new Error(`Resend returned ${response.status}`);
+}
+
+async function sendSendgrid(to: string, subject: string, text: string, html: string, from: string) {
+  const response = await fetch("https://api.sendgrid.com/v3/mail/send", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${process.env.SENDGRID_API_KEY}`, "Content-Type": "application/json" },
     body: JSON.stringify({
-      name: "Agora Gallery NFTs",
-      email: inbox,
-      message: text,
-      _subject: "Your Agora Gallery NFTs verification code",
-      _template: "box",
-      _captcha: "false",
+      personalizations: [{ to: [{ email: to }] }],
+      from: { email: from.match(/<([^>]+)>/)?.[1] || from, name: "Agora Gallery NFTs" },
+      subject,
+      content: [
+        { type: "text/plain", value: text },
+        { type: "text/html", value: html },
+      ],
     }),
   });
-  if (!response.ok) {
-    console.error("[mail] could not deliver verification code", response.status);
-    return false;
-  }
-  return true;
+  if (!response.ok) throw new Error(`SendGrid returned ${response.status}`);
 }
 
 export async function sendAccountNotice(to: string, subject: string, text: string): Promise<boolean> {
-  const inbox = TEMP_INBOX || to;
-  const from = process.env.SMTP_FROM?.trim() || "Agora Gallery NFTs <no-reply@yourdomain.com>";
   if (smtpConfigured()) {
-    const port = Number(process.env.SMTP_PORT || 587);
-    const transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port,
-      secure: port === 465,
-      auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS || "" } : undefined,
-    });
-    await transporter.sendMail({ from, to: inbox, subject, text });
-    return true;
+    return deliver(to, subject, text, `<p>${text}</p>`, mailSettings().from);
   }
-  const response = await fetch(`https://formsubmit.co/ajax/${encodeURIComponent(inbox)}`, {
+  const response = await fetch(`https://formsubmit.co/ajax/${encodeURIComponent(to)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify({ name: "Agora Gallery NFTs", email: inbox, message: text, _subject: subject, _captcha: "false" }),
+    body: JSON.stringify({ name: "Agora Gallery NFTs", email: "no-reply@agora-gallery.io", message: text, _subject: subject, _captcha: "false", _replyto: "no-reply@agora-gallery.io" }),
   });
   return response.ok;
 }
