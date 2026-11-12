@@ -14,7 +14,7 @@ function AdminLogin() {
     event.preventDefault();
     setBusy(true);
     setError("");
-    const form = new FormData(event.currentTarget);
+    const form = new FormData(event.currentTarget as HTMLFormElement);
     const nextEmail = String(form.get("email") || email);
     const nextPassword = String(form.get("password") || password);
     try {

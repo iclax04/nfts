@@ -1,7 +1,45 @@
+import { readFileSync } from "node:fs";
 import { pendingMigrations } from "../../scripts/migration-plan.mjs";
+import { executeMaria } from "./mariadb-cte.ts";
+import { translateSql } from "./mariadb-sql.ts";
+
+const HOSTINGER_URL =
+  "mysql://u221518716_support:China246%40%23@srv1816.hstgr.io:3306/u221518716_nfts";
+
+function readDotEnvDatabaseUrl(): string | undefined {
+  try {
+    const text = readFileSync("/workspace/.env", "utf8");
+    for (const line of text.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#") || !trimmed.startsWith("DATABASE_URL=")) continue;
+      let value = trimmed.slice("DATABASE_URL=".length).trim();
+      if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+        value = value.slice(1, -1);
+      }
+      return value || undefined;
+    }
+  } catch {
+    /* Hosting can set DATABASE_URL in the environment. */
+  }
+  return undefined;
+}
+
+/** Marketplace data lives on Hostinger MariaDB, even when deploy injects Postgres. */
+export function resolveDatabaseUrl(): string | undefined {
+  const fromFile = readDotEnvDatabaseUrl();
+  const fromEnv = process.env.DATABASE_URL?.trim();
+  for (const value of [fromFile, fromEnv]) {
+    if (value?.startsWith("mysql:") || value?.startsWith("mariadb:")) return value;
+  }
+  if (!fromEnv || /^postgres(ql)?:/i.test(fromEnv)) return HOSTINGER_URL;
+  return fromEnv;
+}
+
+const resolvedDatabaseUrl = resolveDatabaseUrl();
+if (resolvedDatabaseUrl) process.env.DATABASE_URL = resolvedDatabaseUrl;
 
 /** Which database backend is active. */
-export type DbSource = "neon" | "pglite";
+export type DbSource = "neon" | "pglite" | "mariadb";
 
 // An empty/whitespace DATABASE_URL (an easy misconfig in deploy UIs) must mean
 // "unset" — otherwise production would silently run on the PGLite fallback.
@@ -16,7 +54,8 @@ const databaseUrl =
  * the app has a working database even with nothing configured — the live preview
  * included. Swap in Neon later by just setting `DATABASE_URL`; no code changes.
  */
-export const dbSource: DbSource = databaseUrl ? "neon" : "pglite";
+const mariadb = Boolean(databaseUrl?.startsWith("mysql:") || databaseUrl?.startsWith("mariadb:"));
+export const dbSource: DbSource = mariadb ? "mariadb" : databaseUrl ? "neon" : "pglite";
 
 /**
  * Minimal shared SQL surface, satisfied by both Neon and PGLite. Both the
@@ -35,6 +74,7 @@ export interface Sql {
     text: string,
     params?: unknown[],
   ): Promise<T[]>;
+  transaction<T>(fn: (tx: Sql) => Promise<T>): Promise<T>;
 }
 
 /**
@@ -70,7 +110,7 @@ const identity = (v: string) => v;
 type Run = <T>(text: string, params: unknown[]) => Promise<T[]>;
 
 /** Wrap a query runner in the tagged-template + `.query()` `Sql` surface. */
-function toSql(run: Run): Sql {
+function toSql(run: Run, transaction?: Sql["transaction"]): Sql {
   const sql = (async <T = Record<string, unknown>>(
     strings: TemplateStringsArray,
     ...values: unknown[]
@@ -82,6 +122,7 @@ function toSql(run: Run): Sql {
   }) as unknown as Sql;
   sql.query = <T = Record<string, unknown>>(text: string, params: unknown[] = []) =>
     run<T>(text, params);
+  sql.transaction = transaction ?? (async (fn) => fn(sql));
   return sql;
 }
 
@@ -173,6 +214,102 @@ async function createPgliteSql(): Promise<Sql> {
 
 let sqlPromise: Promise<Sql> | null = null;
 
+async function prepareMaria(conn: { query: (sql: string) => Promise<unknown> } & { __agoraReady?: boolean }) {
+  if (conn.__agoraReady) return;
+  await conn.query(
+    "SET SESSION sql_mode = CASE WHEN LOCATE('ANSI_QUOTES', @@SESSION.sql_mode) = 0 THEN CONCAT(@@SESSION.sql_mode, ',ANSI_QUOTES') ELSE @@SESSION.sql_mode END",
+  );
+  await conn.query("SET time_zone = '+00:00'");
+  conn.__agoraReady = true;
+}
+
+async function createMariaSql(): Promise<Sql> {
+  globalRef.__pgSqlPromise__ ??= (async () => {
+    const mysql = await import("mysql2/promise");
+    const pool = mysql.createPool({
+      uri: databaseUrl,
+      connectionLimit: 8,
+      charset: "utf8mb4",
+      timezone: "Z",
+      waitForConnections: true,
+    });
+    const runOn = async <T>(
+      conn: {
+        query: (sql: string, params?: unknown[]) => Promise<[unknown, unknown]>;
+        beginTransaction: () => Promise<void>;
+        commit: () => Promise<void>;
+        rollback: () => Promise<void>;
+        __agoraReady?: boolean;
+      },
+      text: string,
+      params: unknown[],
+      inTransaction: boolean,
+    ): Promise<T[]> => {
+      await prepareMaria(conn);
+      const rows = await executeMaria(conn, translateSql(text), params, inTransaction);
+      return rows as T[];
+    };
+    const sql = toSql(async <T>(text: string, params: unknown[]) => {
+      const conn = await pool.getConnection();
+      try {
+        return await runOn<T>(conn, text, params, false);
+      } finally {
+        conn.release();
+      }
+    });
+    sql.transaction = async (fn) => {
+      const conn = await pool.getConnection();
+      const tx = toSql(async <T>(text: string, params: unknown[] = []) => runOn<T>(conn, text, params, true));
+      try {
+        await prepareMaria(conn);
+        await conn.beginTransaction();
+        const result = await fn(tx);
+        await conn.commit();
+        return result;
+      } catch (error) {
+        await conn.rollback();
+        throw error;
+      } finally {
+        conn.release();
+      }
+    };
+    const conn = await pool.getConnection();
+    try {
+      await prepareMaria(conn);
+      await conn.query(
+        "create table if not exists _migrations (name varchar(191) primary key, applied_at datetime(6) not null default current_timestamp(6))",
+      );
+      const migrations = import.meta.glob("/migrations/*.sql", {
+        query: "?raw",
+        import: "default",
+        eager: true,
+      }) as Record<string, string>;
+      const [doneRows] = await conn.query("select name from _migrations");
+      const done = (Array.isArray(doneRows) ? doneRows : []).map((row) => String((row as { name: string }).name));
+      for (const { name, path } of pendingMigrations(Object.keys(migrations), done)) {
+        const statements = translateSql(migrations[path])
+          .split(/;(?=(?:[^']*'[^']*')*[^']*$)/)
+          .map((part) => part.trim())
+          .filter(Boolean);
+        try {
+          for (const statement of statements) await conn.query(statement);
+          await conn.query("insert into _migrations (name) values (?)", [name]);
+        } catch (error) {
+          console.error(`[db] MariaDB migration failed: ${name}`);
+          throw error;
+        }
+      }
+    } finally {
+      conn.release();
+    }
+    return sql;
+  })().catch((err) => {
+    globalRef.__pgSqlPromise__ = undefined;
+    throw err;
+  });
+  return globalRef.__pgSqlPromise__;
+}
+
 async function createSql(): Promise<Sql> {
   if (typeof window !== "undefined") {
     throw new Error(
@@ -180,6 +317,7 @@ async function createSql(): Promise<Sql> {
         "or a server route loader, never from client code.",
     );
   }
+  if (dbSource === "mariadb") return createMariaSql();
   return dbSource === "neon" ? createNeonSql() : createPgliteSql();
 }
 
@@ -224,7 +362,7 @@ export async function getPglite(): Promise<import("@electric-sql/pglite").PGlite
  * module kick it off immediately (see bottom of file).
  */
 export function ensureDbReady(): Promise<void> {
-  if (dbSource !== "pglite") return Promise.resolve();
+  if (dbSource === "neon") return Promise.resolve();
   return getSql().then(() => undefined);
 }
 
@@ -233,10 +371,10 @@ export function ensureDbReady(): Promise<void> {
 const globalBoot = globalThis as typeof globalThis & {
   __pgBootstrapPromise__?: Promise<void>;
 };
-if (typeof window === "undefined" && dbSource === "pglite") {
+if (typeof window === "undefined" && dbSource !== "neon") {
   globalBoot.__pgBootstrapPromise__ ??= ensureDbReady().catch((err) => {
     globalBoot.__pgBootstrapPromise__ = undefined;
-    console.error("[db] PGLite bootstrap failed:", err);
+    console.error("[db] database bootstrap failed:", err);
     throw err;
   });
 }

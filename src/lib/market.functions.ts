@@ -735,7 +735,7 @@ export const getMe = createServerFn({ method: "GET" })
       [context.userId],
     );
     const notifications = await sql.query<Note>(
-      `select id, body, href, read, ${ISO("created_at")} as created_at
+      `select id, body, href, "read", ${ISO("created_at")} as created_at
        from notifications where user_id = $1 order by created_at desc limit 20`,
       [context.userId],
     );
@@ -762,7 +762,7 @@ export const markNotificationsRead = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .handler(async ({ context }) => {
     const sql = await getSql();
-    await sql.query(`update notifications set read = true where user_id = $1 and read = false`, [context.userId]);
+    await sql.query(`update notifications set "read" = true where user_id = $1 and "read" = false`, [context.userId]);
     return { ok: true };
   });
 

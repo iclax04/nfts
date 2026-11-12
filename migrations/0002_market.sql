@@ -138,7 +138,7 @@ create table if not exists notifications (
   user_id text not null,
   body text not null,
   href text,
-  read boolean not null default false,
+  "read" boolean not null default false,
   created_at timestamptz not null default now()
 );
 
