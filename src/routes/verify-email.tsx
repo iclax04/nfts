@@ -31,6 +31,7 @@ function VerifyPage() {
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [wait, setWait] = useState(sent === "1" ? 60 : 0);
+  const [sending, setSending] = useState(sent !== "1");
   const [backup, setBackup] = useState<string | null>(null);
 
   useEffect(() => {
