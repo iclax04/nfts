@@ -142,17 +142,14 @@ const trustedOrigins: string[] = explicitBaseURL
 const databaseUrl = env("DATABASE_URL");
 
 function mariaAuthPool(url: string) {
-  const pool = mysql.createPool({
+  return mysql.createPool({
     uri: url,
     connectionLimit: 5,
     charset: "utf8mb4",
     timezone: "Z",
     waitForConnections: true,
+    connectTimeout: 10_000,
   });
-  pool.pool.on("connection", (connection) => {
-    connection.query("SET time_zone = '+00:00'");
-  });
-  return pool;
 }
 
 // Static broker OAuth endpoints (skip OIDC discovery on every sign-in / callback).
