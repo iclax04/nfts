@@ -2,6 +2,13 @@ import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto
 import { getSql } from "@/lib/db";
 import { sendVerificationEmail } from "@/lib/mail.server";
 
+function mailWithin(send: Promise<boolean>): Promise<boolean> {
+  return Promise.race([
+    send,
+    new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 7000)),
+  ]);
+}
+
 function hashCode(code: string, salt: string): string {
   return createHash("sha256").update(`${salt}:${code}`).digest("hex");
 }
@@ -70,7 +77,7 @@ export async function issueCode(userId: string, opts?: { ip?: string; bypassLimi
     const pending = rememberedCode(userId);
     if (pending?.sent) return { ok: true, already: false, sent: true, email };
     if (pending) {
-      const sent = await sendVerificationEmail(email, pending.code);
+  const sent = await mailWithin(sendVerificationEmail(email, pending.code));
       pending.sent = sent;
       if (!sent) throw new Error("We could not email the code. Use Resend code.");
       return { ok: true, already: false, sent: true, email };
@@ -91,7 +98,7 @@ export async function issueCode(userId: string, opts?: { ip?: string; bypassLimi
     `insert into email_verifications (user_id, code_hash, salt, expires_at) values ($1, $2, $3, now() + interval '10 minutes')`,
     [userId, hashCode(code, salt), salt],
   );
-  const sent = await sendVerificationEmail(email, code);
+  const sent = await mailWithin(sendVerificationEmail(email, code));
   const pending = pendingCodes.get(userId);
   if (pending) pending.sent = sent;
   if (!sent) {

@@ -234,21 +234,6 @@ export const auth = betterAuth({
   // Local email/password — toggled only via `./email-password` (not a plugin).
   ...(emailAndPasswordEnabled ? { emailAndPassword: { enabled: true } } : {}),
 
-  databaseHooks: {
-    user: {
-      create: {
-        after: async (user) => {
-          try {
-            const { issueCode } = await import("../verify.server");
-            await issueCode(user.id);
-          } catch (error) {
-            console.error("[mail] could not send the verification code", error);
-          }
-        },
-      },
-    },
-  },
-
   // `__Host-` prefixed cookies: the browser REFUSES any same-named cookie that
   // carries a `Domain` attribute, so a sibling `*.grok.me` app cannot "toss" a
   // `Domain=.grok.me` session cookie onto this app. `__Host-` requires Secure +
