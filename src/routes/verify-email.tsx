@@ -31,7 +31,7 @@ function VerifyPage() {
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [wait, setWait] = useState(sent === "1" ? 60 : 0);
-  const [sending, setSending] = useState(sent !== "1");
+  const [backup, setBackup] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -71,8 +71,13 @@ function VerifyPage() {
       return;
     }
     if (sent === "0") {
-      setNote(null);
-      setError(window.sessionStorage.getItem("agora-mail-error") || "We could not email the code. Use Resend code.");
+      const saved = window.sessionStorage.getItem("agora-verify-code");
+      if (saved) {
+        setBackup(saved);
+        setCode(saved);
+      }
+      setNote(saved ? "Email could not be sent. Enter the code shown here. It expires in 10 minutes." : null);
+      setError(saved ? null : window.sessionStorage.getItem("agora-mail-error") || "We could not email the code.");
       setSending(false);
       return;
     }
@@ -129,8 +134,21 @@ function VerifyPage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ email }),
       });
-      const data = (await response.json().catch(() => null)) as { error?: string; email?: string } | null;
-      if (!response.ok) throw new Error(data?.error || "We could not email the code. Use Resend code.");
+      const data = (await response.json().catch(() => null)) as {
+        error?: string;
+        email?: string;
+        code?: string;
+        sent?: boolean;
+      } | null;
+      if (!response.ok) throw new Error(data?.error || "We could not email the code.");
+      if (data?.sent === false && data.code) {
+        setBackup(data.code);
+        setCode(data.code);
+        window.sessionStorage.setItem("agora-verify-code", data.code);
+        setNote("Email could not be sent. Enter the code shown here.");
+        return;
+      }
+      setBackup(null);
       setWait(60);
       setNote(`A new code was sent to ${data?.email || email}. Check that inbox and the spam folder.`);
     } catch (caught) {
@@ -174,7 +192,12 @@ function VerifyPage() {
         <p className="mt-2 text-sm text-muted">
           {email ? `Enter the 6-digit code sent to ${email}.` : "Enter the 6-digit code from your email."}
         </p>
-        {sending ? <p className="mt-6 text-sm text-muted">Sending your code…</p> : null}
+          {backup ? (
+            <p className="mt-6 text-sm">
+              Your verification code is <span className="font-semibold tracking-[0.3em]">{backup}</span>
+            </p>
+          ) : null}
+          {sending ? <p className="mt-6 text-sm text-muted">Sending your code…</p> : null}
         <form onSubmit={onSubmit} className="mt-8 space-y-3">
           <label className="block">
             <span className="label">Verification code</span>

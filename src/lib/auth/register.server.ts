@@ -59,13 +59,19 @@ export async function registerAccount(request: Request): Promise<Response> {
   await sql.query(`update "user" set "emailVerified" = false, "updatedAt" = now() where "id" = $1`, [payload.user.id]);
   let sent = true;
   let error = "";
+  let code = "";
   try {
-    await issueCode(payload.user.id, { ip });
+    const issued = await issueCode(payload.user.id, { ip });
+    sent = issued.sent !== false;
+    if (!sent) {
+      code = issued.code || "";
+      error = "We could not email the code. Enter the code shown on the next page.";
+    }
   } catch (caught) {
     sent = false;
-    error = caught instanceof Error ? caught.message : "We could not email the code. Use Resend code.";
+    error = caught instanceof Error ? caught.message : "We could not email the code. Enter the code shown on the next page.";
   }
-  return json({ ok: true, email, sent, error }, 200, signup.headers);
+  return json({ ok: true, email, sent, error, code: code || undefined }, 200, signup.headers);
 }
 
 export async function verifyEmailCode(request: Request): Promise<Response> {
@@ -89,7 +95,13 @@ export async function resendEmailCode(request: Request): Promise<Response> {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return json({ error: "Enter a valid email address." }, 400);
   try {
     const result = await issueCodeForEmail(email, clientIp(request));
-    return json({ ok: true, email: result.email, sent: result.sent });
+    return json({
+      ok: true,
+      email: result.email,
+      sent: result.sent,
+      code: result.sent ? undefined : result.code,
+      error: result.sent ? undefined : "We could not email the code. Enter the code shown on this page.",
+    });
   } catch (caught) {
     const message = caught instanceof Error ? caught.message : "We could not email the code. Use Resend code.";
     const status = /too many|wait 60/i.test(message) ? 429 : 502;

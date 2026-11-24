@@ -77,9 +77,9 @@ export async function issueCode(userId: string, opts?: { ip?: string; bypassLimi
     const pending = rememberedCode(userId);
     if (pending?.sent) return { ok: true, already: false, sent: true, email };
     if (pending) {
-  const sent = await mailWithin(sendVerificationEmail(email, pending.code));
+      const sent = await mailWithin(sendVerificationEmail(email, pending.code));
       pending.sent = sent;
-      if (!sent) throw new Error("We could not email the code. Use Resend code.");
+      if (!sent) return { ok: true, already: false, sent: false, email, code: pending.code };
       return { ok: true, already: false, sent: true, email };
     }
   }
@@ -101,11 +101,7 @@ export async function issueCode(userId: string, opts?: { ip?: string; bypassLimi
   const sent = await mailWithin(sendVerificationEmail(email, code));
   const pending = pendingCodes.get(userId);
   if (pending) pending.sent = sent;
-  if (!sent) {
-    await sql.query(`update email_verifications set used_at = now() where user_id = $1 and used_at is null`, [userId]);
-    pendingCodes.delete(userId);
-    throw new Error("We could not email the code. Use Resend code.");
-  }
+  if (!sent) return { ok: true, already: false, sent: false, email, code };
   return { ok: true, already: false, sent: true, email };
 }
 

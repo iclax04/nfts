@@ -79,14 +79,14 @@ export async function sendVerificationEmail(accountEmail: string, code: string):
 }
 
 async function deliver(to: string, subject: string, text: string, html: string, from: string): Promise<boolean> {
-  const provider = (process.env.MAIL_PROVIDER || "").trim().toLowerCase();
+  const resendKey = process.env.RESEND_API_KEY?.trim();
+  const sendgridKey = process.env.SENDGRID_API_KEY?.trim();
+  const provider = resendKey ? "resend" : sendgridKey ? "sendgrid" : "";
   try {
-    if (provider === "resend" && process.env.RESEND_API_KEY) {
-      await sendResend(to, subject, text, html, from);
-    } else if (provider === "sendgrid" && process.env.SENDGRID_API_KEY) {
-      await sendSendgrid(to, subject, text, html, from);
-    } else {
-      console.error("[mail] not sent: set MAIL_PROVIDER=resend and RESEND_API_KEY");
+    if (resendKey) await sendResend(to, subject, text, html, from);
+    else if (sendgridKey) await sendSendgrid(to, subject, text, html, from);
+    else {
+      console.error("[mail] not sent: RESEND_API_KEY is not set");
       return false;
     }
     console.info(`[mail] sent to ${to} via ${provider}`);
@@ -104,7 +104,10 @@ async function sendResend(to: string, subject: string, text: string, html: strin
     headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, "Content-Type": "application/json" },
     body: JSON.stringify({ from, to, subject, text, html }),
   });
-  if (!response.ok) throw new Error(`Resend returned ${response.status}`);
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(`Resend returned ${response.status}${detail ? `: ${detail.slice(0, 180)}` : ""}`);
+  }
 }
 
 async function sendSendgrid(to: string, subject: string, text: string, html: string, from: string) {

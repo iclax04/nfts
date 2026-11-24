@@ -50,13 +50,23 @@ function CreateAccountPage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ name: name.trim(), username: handle, email: email.trim(), password }),
       });
-      const data = (await result.json().catch(() => null)) as { error?: string; email?: string; sent?: boolean } | null;
+      const data = (await result.json().catch(() => null)) as {
+        error?: string;
+        email?: string;
+        sent?: boolean;
+        code?: string;
+      } | null;
       if (!result.ok) throw new Error(data?.error || "Could not create the account.");
       created = true;
       try {
         window.sessionStorage.setItem("agora-signup-profile", JSON.stringify({ username: handle, displayName: name.trim() }));
-        if (data?.sent === false) window.sessionStorage.setItem("agora-mail-error", data.error || "We could not email the code. Use Resend code.");
-        else window.sessionStorage.removeItem("agora-mail-error");
+        if (data?.sent === false) {
+          window.sessionStorage.setItem("agora-mail-error", data.error || "We could not email the code. Enter the code shown on the next page.");
+          if (data.code) window.sessionStorage.setItem("agora-verify-code", data.code);
+        } else {
+          window.sessionStorage.removeItem("agora-mail-error");
+          window.sessionStorage.removeItem("agora-verify-code");
+        }
       } catch {
         /* storage unavailable */
       }
