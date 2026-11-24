@@ -1,11 +1,11 @@
 import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import { getSql } from "@/lib/db";
-import { sendVerificationEmail } from "@/lib/mail.server";
+import { sendVerificationEmail, mailError } from "@/lib/mail.server";
 
 function mailWithin(send: Promise<boolean>): Promise<boolean> {
   return Promise.race([
     send,
-    new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 7000)),
+    new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 12000)),
   ]);
 }
 
@@ -79,7 +79,7 @@ export async function issueCode(userId: string, opts?: { ip?: string; bypassLimi
     if (pending) {
       const sent = await mailWithin(sendVerificationEmail(email, pending.code));
       pending.sent = sent;
-      if (!sent) return { ok: true, already: false, sent: false, email, code: pending.code };
+      if (!sent) return { ok: true, already: false, sent: false, email, code: pending.code, error: mailError() || "We could not email the code." };
       return { ok: true, already: false, sent: true, email };
     }
   }
@@ -101,7 +101,7 @@ export async function issueCode(userId: string, opts?: { ip?: string; bypassLimi
   const sent = await mailWithin(sendVerificationEmail(email, code));
   const pending = pendingCodes.get(userId);
   if (pending) pending.sent = sent;
-  if (!sent) return { ok: true, already: false, sent: false, email, code };
+  if (!sent) return { ok: true, already: false, sent: false, email, code, error: mailError() || "We could not email the code." };
   return { ok: true, already: false, sent: true, email };
 }
 

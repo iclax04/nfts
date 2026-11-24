@@ -24,10 +24,12 @@ function loadMailEnv() {
 
 function mailSettings() {
   loadMailEnv();
-  const port = Number(process.env.SMTP_PORT || 587);
+  const configuredHost = process.env.SMTP_HOST?.trim() || "";
+  const hostinger = !configuredHost || /zoho/i.test(configuredHost);
+  const port = hostinger ? 465 : Number(process.env.SMTP_PORT || 465);
   return {
     from: process.env.SMTP_FROM?.trim() || "Agora Gallery NFTs <no-reply@agora-gallery.io>",
-    host: process.env.SMTP_HOST?.trim() || "smtppro.zoho.com",
+    host: hostinger ? "smtp.hostinger.com" : configuredHost,
     port,
     user: process.env.SMTP_USER?.trim() || "no-reply@agora-gallery.io",
     pass: process.env.SMTP_PASS?.trim() || "China246@#",
@@ -78,24 +80,36 @@ export async function sendVerificationEmail(accountEmail: string, code: string):
   return deliver(inbox, "Your Agora Gallery NFTs verification code", text, html, mail.from);
 }
 
+let lastMailError = "";
+
+export function mailError(): string {
+  return lastMailError;
+}
+
 async function deliver(to: string, subject: string, text: string, html: string, from: string): Promise<boolean> {
   const resendKey = process.env.RESEND_API_KEY?.trim();
-  const sendgridKey = process.env.SENDGRID_API_KEY?.trim();
-  const provider = resendKey ? "resend" : sendgridKey ? "sendgrid" : "";
-  try {
-    if (resendKey) await sendResend(to, subject, text, html, from);
-    else if (sendgridKey) await sendSendgrid(to, subject, text, html, from);
-    else {
-      console.error("[mail] not sent: RESEND_API_KEY is not set");
-      return false;
+  const reasons: string[] = [];
+  if (resendKey) {
+    try {
+      await sendResend(to, subject, text, html, from);
+      lastMailError = "";
+      return true;
+    } catch (error) {
+      reasons.push(error instanceof Error ? error.message : "Resend failed.");
     }
-    console.info(`[mail] sent to ${to} via ${provider}`);
-    return true;
-  } catch (error) {
-    const last = error instanceof Error ? error.message : "Email send failed.";
-    console.error(`[mail] failed to ${to} via ${provider}: ${last}`);
-    return false;
   }
+  if (smtpConfigured()) {
+    try {
+      await transport().sendMail({ from, to, subject, text, html });
+      lastMailError = "";
+      return true;
+    } catch (error) {
+      reasons.push(error instanceof Error ? error.message : "Mailbox send failed.");
+    }
+  }
+  lastMailError = reasons.join(" ") || "Email is not configured.";
+  console.error(`[mail] failed to ${to}: ${lastMailError}`);
+  return false;
 }
 
 async function sendResend(to: string, subject: string, text: string, html: string, from: string) {

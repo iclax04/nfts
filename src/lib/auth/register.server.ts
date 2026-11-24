@@ -65,7 +65,7 @@ export async function registerAccount(request: Request): Promise<Response> {
     sent = issued.sent !== false;
     if (!sent) {
       code = issued.code || "";
-      error = "We could not email the code. Enter the code shown on the next page.";
+      error = issued.error || "We could not email the code. Enter the code shown on the next page.";
     }
   } catch (caught) {
     sent = false;
