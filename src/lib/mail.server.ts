@@ -79,29 +79,23 @@ export async function sendVerificationEmail(accountEmail: string, code: string):
 }
 
 async function deliver(to: string, subject: string, text: string, html: string, from: string): Promise<boolean> {
-  const provider = (process.env.MAIL_PROVIDER || "smtp").trim().toLowerCase();
-  let last = "Mail provider is not configured.";
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
-    try {
-      if (provider === "resend" && process.env.RESEND_API_KEY) {
-        await sendResend(to, subject, text, html, from);
-      } else if (provider === "sendgrid" && process.env.SENDGRID_API_KEY) {
-        await sendSendgrid(to, subject, text, html, from);
-      } else if (smtpConfigured()) {
-        await transport().sendMail({ from, to, subject, text, html });
-      } else {
-        throw new Error(last);
-      }
-      console.info(`[mail] sent to ${to} via ${provider} attempt ${attempt}`);
-      return true;
-    } catch (error) {
-      last = error instanceof Error ? error.message : "Email send failed.";
-      console.error(`[mail] failed to ${to} via ${provider} attempt ${attempt}: ${last}`);
-      if (/timeout|ETIMEDOUT|ECONNECTION|ECONNREFUSED|ENOTFOUND/i.test(last)) break;
-      if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, 400 * attempt));
+  const provider = (process.env.MAIL_PROVIDER || "").trim().toLowerCase();
+  try {
+    if (provider === "resend" && process.env.RESEND_API_KEY) {
+      await sendResend(to, subject, text, html, from);
+    } else if (provider === "sendgrid" && process.env.SENDGRID_API_KEY) {
+      await sendSendgrid(to, subject, text, html, from);
+    } else {
+      console.error("[mail] not sent: set MAIL_PROVIDER=resend and RESEND_API_KEY");
+      return false;
     }
+    console.info(`[mail] sent to ${to} via ${provider}`);
+    return true;
+  } catch (error) {
+    const last = error instanceof Error ? error.message : "Email send failed.";
+    console.error(`[mail] failed to ${to} via ${provider}: ${last}`);
+    return false;
   }
-  return false;
 }
 
 async function sendResend(to: string, subject: string, text: string, html: string, from: string) {
