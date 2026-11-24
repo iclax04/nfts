@@ -48,7 +48,12 @@ function statementsOf(text) {
 
 async function migrateMysql(url) {
   const mysql = await import("mysql2/promise");
-  const conn = await mysql.createConnection({ uri: url, charset: "utf8mb4", timezone: "Z" });
+  const conn = await mysql.createConnection({
+    uri: url,
+    charset: "utf8mb4",
+    timezone: "Z",
+    connectTimeout: 8_000,
+  });
   try {
     await conn.query(
       "SET SESSION sql_mode = CASE WHEN LOCATE('ANSI_QUOTES', @@SESSION.sql_mode) = 0 THEN CONCAT(@@SESSION.sql_mode, ',ANSI_QUOTES') ELSE @@SESSION.sql_mode END",
