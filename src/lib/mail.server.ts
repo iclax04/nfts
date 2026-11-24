@@ -47,6 +47,9 @@ function transport() {
     secure: mail.port === 465,
     requireTLS: mail.port === 587,
     auth: { user: mail.user, pass: mail.pass },
+    connectionTimeout: 8_000,
+    greetingTimeout: 8_000,
+    socketTimeout: 10_000,
   });
 }
 
@@ -94,6 +97,7 @@ async function deliver(to: string, subject: string, text: string, html: string, 
     } catch (error) {
       last = error instanceof Error ? error.message : "Email send failed.";
       console.error(`[mail] failed to ${to} via ${provider} attempt ${attempt}: ${last}`);
+      if (/timeout|ETIMEDOUT|ECONNECTION|ECONNREFUSED|ENOTFOUND/i.test(last)) break;
       if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, 400 * attempt));
     }
   }
