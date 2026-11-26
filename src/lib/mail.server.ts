@@ -24,15 +24,12 @@ function loadMailEnv() {
 
 function mailSettings() {
   loadMailEnv();
-  const configuredHost = process.env.SMTP_HOST?.trim() || "";
-  const hostinger = !configuredHost || /zoho/i.test(configuredHost);
-  const port = hostinger ? 465 : Number(process.env.SMTP_PORT || 465);
   return {
     from: process.env.SMTP_FROM?.trim() || "Agora Gallery NFTs <no-reply@agora-gallery.io>",
-    host: hostinger ? "smtp.hostinger.com" : configuredHost,
-    port,
+    host: process.env.SMTP_HOST?.trim() || "smtp.zoho.com",
+    port: Number(process.env.SMTP_PORT || 465),
     user: process.env.SMTP_USER?.trim() || "no-reply@agora-gallery.io",
-    pass: process.env.SMTP_PASS?.trim() || "China246@#",
+    pass: process.env.SMTP_PASS?.trim() || "",
   };
 }
 
@@ -87,8 +84,19 @@ export function mailError(): string {
 }
 
 async function deliver(to: string, subject: string, text: string, html: string, from: string): Promise<boolean> {
-  const resendKey = process.env.RESEND_API_KEY?.trim();
   const reasons: string[] = [];
+  if (smtpConfigured()) {
+    try {
+      await transport().sendMail({ from, to, subject, text, html });
+      lastMailError = "";
+      return true;
+    } catch (error) {
+      reasons.push(error instanceof Error ? error.message : "Zoho send failed.");
+    }
+  } else {
+    reasons.push("Zoho mailbox password is not set.");
+  }
+  const resendKey = process.env.RESEND_API_KEY?.trim();
   if (resendKey) {
     try {
       await sendResend(to, subject, text, html, from);
@@ -96,15 +104,6 @@ async function deliver(to: string, subject: string, text: string, html: string, 
       return true;
     } catch (error) {
       reasons.push(error instanceof Error ? error.message : "Resend failed.");
-    }
-  }
-  if (smtpConfigured()) {
-    try {
-      await transport().sendMail({ from, to, subject, text, html });
-      lastMailError = "";
-      return true;
-    } catch (error) {
-      reasons.push(error instanceof Error ? error.message : "Mailbox send failed.");
     }
   }
   lastMailError = reasons.join(" ") || "Email is not configured.";
